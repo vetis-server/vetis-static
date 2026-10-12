@@ -20,14 +20,6 @@ const DEFAULT_TTL: Duration = Duration::from_secs(60);
 const DEFAULT_TTI: Duration = Duration::from_secs(10);
 const DEFAULT_CAPACITY: u64 = 1000;
 
-/*
-#[cfg(feature = "runtime-compio")]
-/// Compio runtime support module
-pub mod compio;
-*/
-//#[cfg(feature = "runtime-smol")]
-/// Smol runtime support module
-///pub mod smol;
 #[cfg(feature = "runtime-tokio")]
 /// Tokio runtime support module
 pub mod tokio;
