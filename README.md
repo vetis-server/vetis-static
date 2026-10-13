@@ -20,7 +20,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vetis-static = "0.1.0-beta.1"
+vetis-static = "0.1.1-beta.2"
 ```
 
 ### Runtime Features
