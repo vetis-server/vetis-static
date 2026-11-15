@@ -38,16 +38,16 @@ Choose the appropriate runtime feature for your project:
 Configure static file serving using the builder pattern:
 
 ```rust,ignore
-use vetis_static::StaticPathConfig;
+use vetis_static::StaticHookConfig;
 use std::time::Duration;
 
-let config = StaticPathConfig::builder()
+let config = StaticHookConfig::builder()
     .uri("/static")
     .extensions(r"\.(html|css|js|png|jpg)$")
     .directory("./public")
     .index_files(vec!["index.html".to_string()])
     .cache(
-        vetis_static::StaticPathCache::builder()
+        vetis_static::StaticHookCache::builder()
             .max_file_size(10 * 1024 * 1024) // 10MB
             .ttl(Duration::from_secs(60))
             .tti(Duration::from_secs(10))
@@ -74,7 +74,7 @@ cache:
 
 ### Configuration Options
 
-#### StaticPathConfig
+#### StaticHookConfig
 
 - **uri**: The URI prefix for serving static files (required)
 - **extensions**: Comma-separated list of file extensions to serve (required)
@@ -82,7 +82,7 @@ cache:
 - **index_files**: Optional list of index file names to serve for directory requests
 - **cache**: Optional cache configuration
 
-#### StaticPathCache
+#### StaticHookCache
 
 - **max_file_size**: Maximum file size to cache in bytes (default: 10MB)
 - **ttl**: Time-to-live for cached entries (default: 60s)
