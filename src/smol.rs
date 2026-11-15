@@ -1,4 +1,4 @@
-use crate::{format_date, StaticFile, StaticFileMetadata, StaticPathConfig};
+use crate::{format_date, StaticFile, StaticFileMetadata, StaticHookConfig};
 use http::{HeaderMap, HeaderValue};
 use hyper_body_utils::HttpBody;
 use log::error;
@@ -10,17 +10,17 @@ use std::os::windows::fs::MetadataExt;
 use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
 use vetis::{
     errors::{FileError, HostError, VetisError},
-    virtual_host::path::Path,
+    virtual_host::path::Hook,
     Request, Response, VetisResult,
 };
 
 /// Static path
-pub struct StaticPath {
-    config: StaticPathConfig,
+pub struct StaticHook {
+    config: StaticHookConfig,
     index_file: Option<String>,
 }
 
-impl StaticPath {
+impl StaticHook {
     /// Create a new static path with provided configuration
     ///
     /// # Arguments
@@ -29,8 +29,8 @@ impl StaticPath {
     ///
     /// # Returns
     ///
-    /// * `StaticPath` - The static path
-    pub fn new(config: StaticPathConfig) -> StaticPath {
+    /// * `StaticHook` - The static path
+    pub fn new(config: StaticHookConfig) -> StaticHook {
         if let Some(index_files) = config.index_files() {
             let directory = PathBuf::from(config.directory());
             if let Some(index_file) = index_files
@@ -41,16 +41,16 @@ impl StaticPath {
                         .exists()
                 })
             {
-                return StaticPath {
+                return StaticHook {
                     config: config.clone(),
                     index_file: Some(index_file.to_string()),
                 };
             }
         }
-        StaticPath { config, index_file: None }
+        StaticHook { config, index_file: None }
     }
 
-    async fn cache_file(&self, file_path: &std::path::Path) -> VetisResult<StaticFile> {
+    async fn cache_file(&self, file_path: &std::path::Hook) -> VetisResult<StaticFile> {
         let path = file_path
             .display()
             .to_string();
@@ -126,7 +126,7 @@ impl StaticPath {
 
     async fn serve_file(
         &self,
-        file_path: &std::path::Path,
+        file_path: &std::path::Hook,
         range: Option<&str>,
     ) -> VetisResult<Response> {
         let file = self
@@ -230,7 +230,7 @@ impl StaticPath {
         Ok(response)
     }
 
-    async fn serve_index_file(&self, directory: &std::path::Path) -> Result<Response, VetisError> {
+    async fn serve_index_file(&self, directory: &std::path::Hook) -> Result<Response, VetisError> {
         match &self.index_file {
             Some(index_file) => {
                 let full_path = directory.join(index_file);
@@ -245,27 +245,26 @@ impl StaticPath {
     }
 }
 
-impl Path for StaticPath {
-    /// Returns the uri of the static path
-    ///
-    /// # Returns
-    ///
-    /// * `&str` - The uri of the static path
-    fn uri(&self) -> &str {
-        self.config.uri()
+impl Hook for StaticHook {
+    fn has_matches(&self, context: &Context) -> bool {
+        if let Some(matcher) = &self.matcher { matcher.is_match(context) } else { true }
     }
 
-    /// Handles the request for the static path
-    ///
-    /// # Returns
-    ///
-    /// * `Pin<Box<dyn Future<Output = Result<Response, VetisError>> + Send + '_>>` - The response to the request
+    fn phase(&self) -> &HookPhase {
+        &HookPhase::Content
+    }
+
+    fn matcher_mut(&mut self) -> Option<&mut Box<dyn Matcher>> {
+        self.matcher
+            .as_mut()
+    }
+
     fn handle<'a>(
         &'a self,
         request: Request,
-        uri: Arc<String>,
-    ) -> Pin<Box<dyn Future<Output = Result<Response, VetisError>> + Send + 'a>> {
-        Box::pin(async move {
+        mut response: Option<Response>,
+    ) -> VetisFutureResult<'a, (Request, Option<Response>)> {
+        let future = async move {
             let ext_regex = regex::Regex::new(
                 self.config
                     .extensions(),
@@ -276,56 +275,89 @@ impl Path for StaticPath {
                     .directory(),
             );
 
-            let uri = uri
+            let uri = request
+                .uri()
+                .path()
                 .strip_prefix("/")
-                .unwrap_or(&uri);
-            let file = directory.join(uri);
+                .unwrap_or(&request.uri().path());
 
-            if self
+            let static_dir = if directory.is_relative()
+                && let Some(root_dir) = request.root_directory()
+            {
+                root_dir.join(&directory)
+            } else {
+                directory.to_path_buf()
+            };
+
+            let file = static_dir.join(uri);
+            if let Some(index_files) = self
                 .config
                 .index_files()
-                .is_some()
+                && file.is_dir()
             {
-                if !file.exists() {
-                    if let Ok(ext_regex) = ext_regex {
-                        if !ext_regex.is_match(uri.as_ref()) {
-                            return Err(VetisError::Host(HostError::File(FileError::NotFound)));
-                        }
+                for index in index_files {
+                    let path_to_index = static_dir.join(index.as_str());
+                    if path_to_index.exists() {
+                        response = Some(
+                            self.serve_file(&path_to_index, None)
+                                .await?,
+                        );
                     }
-                } else if file.is_dir() {
-                    return self
-                        .serve_index_file(&file)
-                        .await;
                 }
-            } else if !file.exists() {
-                return Err(VetisError::Host(HostError::File(FileError::NotFound)));
+                return Err(VetisError::Host(HostError::Runtime(
+                    RuntimeError::new("Access denied.").with_status_code(StatusCode::FORBIDDEN),
+                )));
+            }
+
+            if !file.exists() {
+                return Err(VetisError::Host(HostError::Runtime(
+                    RuntimeError::new("File does not exist")
+                        .with_status_code(StatusCode::NOT_FOUND),
+                )));
+            }
+
+            if let Ok(ext_regex) = ext_regex
+                && !ext_regex.is_match(uri.as_ref())
+            {
+                return Err(VetisError::Host(HostError::Runtime(
+                    RuntimeError::new("Access denied.").with_status_code(StatusCode::FORBIDDEN),
+                )));
             }
 
             if request.method() == http::Method::HEAD {
-                return self
-                    .serve_metadata(file)
-                    .await;
+                response = Some(
+                    self.serve_metadata(&file)
+                        .await?,
+                );
             }
 
             let range = if request
                 .headers()
                 .contains_key(http::header::RANGE)
             {
-                let value = request
+                if let Some(header) = request
                     .headers()
-                    .get(http::header::RANGE);
-                Some(
-                    value
-                        .unwrap()
-                        .to_str()
-                        .unwrap(),
-                )
+                    .get(http::header::RANGE)
+                {
+                    match header.to_str() {
+                        Ok(v) => Some(v),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
             } else {
                 None
             };
 
-            self.serve_file(&file, range)
-                .await
-        })
+            response = Some(
+                self.serve_file(&file, range)
+                    .await?,
+            );
+
+            Ok((request, response))
+        };
+
+        Box::pin(future)
     }
 }

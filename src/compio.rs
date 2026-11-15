@@ -1,4 +1,4 @@
-use crate::{format_date, StaticFile, StaticFileMetadata, StaticPathConfig};
+use crate::{format_date, StaticFile, StaticFileMetadata, StaticHookConfig};
 use compio::fs::File;
 use http::{HeaderMap, HeaderValue};
 use hyper_body_utils::HttpBody;
@@ -11,18 +11,18 @@ use std::os::windows::fs::MetadataExt;
 use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
 use vetis::{
     errors::{FileError, VetisError, HostError},
-    virtual_host::path::Path,
+    virtual_host::path::Hook,
     Request, Response, VetisResult,
 };
 
 /// Static path
-pub struct StaticPath {
-    config: StaticPathConfig,
+pub struct StaticHook {
+    config: StaticHookConfig,
     index_file: Option<String>,
     //file_cache: VetisFileCache,
 }
 
-impl StaticPath {
+impl StaticHook {
     /// Create a new static path with provided configuration
     ///
     /// # Arguments
@@ -31,8 +31,8 @@ impl StaticPath {
     ///
     /// # Returns
     ///
-    /// * `StaticPath` - The static path
-    pub fn new(config: StaticPathConfig) -> StaticPath {
+    /// * `StaticHook` - The static path
+    pub fn new(config: StaticHookConfig) -> StaticHook {
         /*
         let file_cache = if let Some(cache) = config.cache() {
             CacheBuilder::new(cache.capacity())
@@ -56,17 +56,17 @@ impl StaticPath {
                         .exists()
                 })
             {
-                return StaticPath {
+                return StaticHook {
                     config: config.clone(),
                     index_file: Some(index_file.to_string()),
                     //file_cache,
                 };
             }
         }
-        StaticPath { config, index_file: None /*file_cache*/ }
+        StaticHook { config, index_file: None /*file_cache*/ }
     }
 
-    async fn cache_file(&self, file_path: &std::path::Path) -> VetisResult<StaticFile> {
+    async fn cache_file(&self, file_path: &std::path::Hook) -> VetisResult<StaticFile> {
         let path = file_path
             .display()
             .to_string();
@@ -146,7 +146,7 @@ impl StaticPath {
 
     async fn serve_file(
         &self,
-        file_path: &std::path::Path,
+        file_path: &std::path::Hook,
         range: Option<&str>,
     ) -> VetisResult<Response> {
         let file = self
@@ -259,7 +259,7 @@ impl StaticPath {
         Ok(response)
     }
 
-    async fn serve_index_file(&self, directory: &std::path::Path) -> VetisResult<Response> {
+    async fn serve_index_file(&self, directory: &std::path::Hook) -> VetisResult<Response> {
         match &self.index_file {
             Some(index_file) => {
                 let full_path = directory.join(index_file);
@@ -274,7 +274,7 @@ impl StaticPath {
     }
 }
 
-impl Path for StaticPath {
+impl Hook for StaticHook {
     /// Returns the uri of the static path
     ///
     /// # Returns

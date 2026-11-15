@@ -1,24 +1,15 @@
 #![doc = include_str!("../README.md")]
 #![deny(missing_docs)]
-use crate::tokio::StaticPath;
-use serde::{Deserialize, Deserializer, Serialize};
-use std::{
-    path::PathBuf,
-    time::{Duration, SystemTime},
-};
+use crate::tokio::StaticHook;
+use serde::{Deserialize, Serialize};
+use std::{path::PathBuf, time::SystemTime};
 use time::{OffsetDateTime, format_description::well_known::Rfc2822};
 use vetis::{
-    Str, VetisResult,
+    Str, VetisHook, VetisResult,
     errors::{ConfigError, VetisError},
-    host::path::{Path, PathConfig},
+    hook::HookConfig,
+    matcher::{self, MatcherConfig},
 };
-
-//pub(crate) type VetisFileCache = Cache<String, StaticFile>;
-
-const MAX_FILE_SIZE: usize = 10 * 1024 * 1024; // 10MB
-const DEFAULT_TTL: Duration = Duration::from_secs(60);
-const DEFAULT_TTI: Duration = Duration::from_secs(10);
-const DEFAULT_CAPACITY: u64 = 1000;
 
 #[cfg(feature = "runtime-tokio")]
 /// Tokio runtime support module
@@ -42,123 +33,31 @@ pub fn format_date(date: SystemTime) -> String {
         .unwrap()
 }
 
-/// Builder for creating `StaticPathCache` instances.
-#[derive(Debug)]
-pub struct StaticPathCacheBuilder {
-    max_file_size: usize,
-    ttl: Duration,
-    tti: Duration,
-    capacity: u64,
-}
-
-impl StaticPathCacheBuilder {
-    /// Set max file size
-    pub fn max_file_size(mut self, max_file_size: usize) -> Self {
-        self.max_file_size = max_file_size;
-        self
-    }
-
-    /// Set time to live
-    pub fn ttl(mut self, ttl: Duration) -> Self {
-        self.ttl = ttl;
-        self
-    }
-
-    /// Set time to idle
-    pub fn tti(mut self, tti: Duration) -> Self {
-        self.tti = tti;
-        self
-    }
-
-    /// Set capacity
-    pub fn capacity(mut self, capacity: u64) -> Self {
-        self.capacity = capacity;
-        self
-    }
-
-    /// Build the `StaticPathCache`
-    pub fn build(self) -> StaticPathCache {
-        StaticPathCache {
-            max_file_size: self.max_file_size,
-            ttl: self.ttl,
-            tti: self.tti,
-            capacity: self.capacity,
-        }
-    }
-}
-
-/// Configuration for static file caching.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StaticPathCache {
-    max_file_size: usize,
-    #[serde(deserialize_with = "deserialize_duration")]
-    ttl: Duration,
-    #[serde(deserialize_with = "deserialize_duration")]
-    tti: Duration,
-    capacity: u64,
-}
-
-impl Default for StaticPathCache {
-    fn default() -> Self {
-        Self {
-            max_file_size: MAX_FILE_SIZE,
-            ttl: DEFAULT_TTL,
-            tti: DEFAULT_TTI,
-            capacity: DEFAULT_CAPACITY,
-        }
-    }
-}
-
-/// Configuration for static file caching.
-impl StaticPathCache {
-    /// Create a new builder for `StaticPathCache`.
-    pub fn builder() -> StaticPathCacheBuilder {
-        StaticPathCacheBuilder {
-            max_file_size: MAX_FILE_SIZE,
-            ttl: DEFAULT_TTL,
-            tti: DEFAULT_TTI,
-            capacity: DEFAULT_CAPACITY,
-        }
-    }
-
-    /// Return max file size
-    pub fn max_file_size(&self) -> usize {
-        self.max_file_size
-    }
-
-    /// Return time to live
-    pub fn ttl(&self) -> Duration {
-        self.ttl
-    }
-
-    /// Return time to idle
-    pub fn tti(&self) -> Duration {
-        self.tti
-    }
-
-    /// Return capacity
-    pub fn capacity(&self) -> u64 {
-        self.capacity
-    }
-}
-
-/// Builder for creating `StaticPathConfig` instances.
-pub struct StaticPathConfigBuilder {
-    uri: Str,
+/// Builder for creating `StaticHookConfig` instances.
+pub struct StaticHookConfigBuilder {
+    matcher: Option<Box<dyn matcher::MatcherConfig>>,
     extensions: Str,
     directory: Str,
     index_files: Option<Vec<Str>>,
-    cache: Option<StaticPathCache>,
 }
 
-impl StaticPathConfigBuilder {
-    /// Allow set the URI of the static path.
+impl StaticHookConfigBuilder {
+    /// Add a Matcher to hook
     ///
-    /// # Returns
+    /// # Arguments
     ///
-    /// * `Self` - The builder.
-    pub fn uri(mut self, uri: &str) -> Self {
-        self.uri = uri.into();
+    /// * `matcher` - Matcher configuration
+    ///
+    /// # Notes
+    ///
+    /// Add a Matcher configuration to the hook, matchers are
+    /// useful to add determine if a particular hook will
+    /// be used.
+    pub fn matcher<M>(mut self, matcher: M) -> Self
+    where
+        M: MatcherConfig + 'static,
+    {
+        self.matcher = Some(Box::new(matcher));
         self
     }
 
@@ -192,104 +91,76 @@ impl StaticPathConfigBuilder {
         self
     }
 
-    /// Allow set the cache of the static path.
+    /// Build the `StaticHookConfig` with the configured settings.
     ///
     /// # Returns
     ///
-    /// * `Self` - The builder.
-    pub fn cache(mut self, cache: StaticPathCache) -> Self {
-        self.cache = Some(cache);
-        self
-    }
-
-    /// Build the `StaticPathConfig` with the configured settings.
-    ///
-    /// # Returns
-    ///
-    /// * `VetisResult<StaticPathConfig>` - The `StaticPathConfig` with the configured settings.
-    pub fn build(self) -> VetisResult<StaticPathConfig> {
-        if self.uri.is_empty() {
-            return Err(VetisError::Config(ConfigError::Path("URI cannot be empty".to_string())));
-        }
+    /// * `VetisResult<StaticHookConfig>` - The `StaticHookConfig` with the configured settings.
+    pub fn build(self) -> VetisResult<StaticHookConfig> {
         if self
             .extensions
             .is_empty()
         {
-            return Err(VetisError::Config(ConfigError::Path(
-                "Extensions cannot be empty".to_string(),
-            )));
+            return Err(VetisError::Config(ConfigError::Hook("Extensions cannot be empty".into())));
         }
         if self
             .directory
             .is_empty()
         {
-            return Err(VetisError::Config(ConfigError::Path(
-                "Directory cannot be empty".to_string(),
-            )));
+            return Err(VetisError::Config(ConfigError::Hook("Directory cannot be empty".into())));
         }
 
-        Ok(StaticPathConfig {
-            uri: self.uri,
+        Ok(StaticHookConfig {
+            matcher: self
+                .matcher
+                .map_or(None, |val| Some(val)),
             extensions: self.extensions,
             directory: self.directory,
-            index_files: self.index_files,
-            cache: self.cache,
+            index_files: self
+                .index_files
+                .map_or(None, |val| Some(val.into_boxed_slice())),
         })
     }
 }
 
 /// Configuration for static file serving.
 #[derive(Clone, Serialize, Deserialize)]
-pub struct StaticPathConfig {
-    uri: Str,
+pub struct StaticHookConfig {
+    matcher: Option<Box<dyn MatcherConfig>>,
     extensions: Str,
     directory: Str,
-    index_files: Option<Vec<Str>>,
-    cache: Option<StaticPathCache>,
+    index_files: Option<Box<[Str]>>,
 }
 
 #[typetag::serde(name = "static")]
-impl PathConfig for StaticPathConfig {
-    fn uri(&mut self, uri: &str) {
-        self.uri = uri.into();
+impl HookConfig for StaticHookConfig {
+    fn matcher(&self) -> Option<&Box<dyn MatcherConfig>> {
+        self.matcher
+            .as_ref()
     }
 
-    fn boxed_clone(&self) -> Box<dyn PathConfig> {
+    fn boxed_clone(&self) -> Box<dyn HookConfig> {
         Box::new(self.clone())
     }
 
-    fn boxed_path(&self) -> Box<dyn Path> {
-        Box::new(StaticPath::new(self.clone()))
-    }
-
-    fn boxed_sync(&self) -> Box<dyn Path + Send + Sync> {
-        Box::new(StaticPath::new(self.clone()))
+    fn boxed_hook(&self) -> Box<dyn VetisHook> {
+        Box::new(StaticHook::new(self.clone()))
     }
 }
 
-impl StaticPathConfig {
-    /// Allow create a new `StaticPathConfigBuilder` with default settings.
+impl StaticHookConfig {
+    /// Allow create a new `StaticHookConfigBuilder` with default settings.
     ///
     /// # Returns
     ///
-    /// * `StaticPathConfigBuilder` - The builder.
-    pub fn builder() -> StaticPathConfigBuilder {
-        StaticPathConfigBuilder {
-            uri: "/".into(),
+    /// * `StaticHookConfigBuilder` - The builder.
+    pub fn builder() -> StaticHookConfigBuilder {
+        StaticHookConfigBuilder {
+            matcher: None,
             extensions: ".html".into(),
             directory: ".".into(),
             index_files: None,
-            cache: Some(StaticPathCache::default()),
         }
-    }
-
-    /// Returns uri
-    ///
-    /// # Returns
-    ///
-    /// * `&str` - The uri.
-    pub fn uri(&self) -> &str {
-        &self.uri
     }
 
     /// Returns extensions
@@ -315,35 +186,19 @@ impl StaticPathConfig {
     /// # Returns
     ///
     /// * `&Option<Vec<String>>` - The index_files.
-    pub fn index_files(&self) -> &Option<Vec<Str>> {
-        &self.index_files
+    pub fn index_files(&self) -> Option<&Box<[Str]>> {
+        self.index_files
+            .as_ref()
     }
-
-    /// Returns cache
-    ///
-    /// # Returns
-    ///
-    /// * `&Option<StaticPathCache>` - The cache.
-    pub fn cache(&self) -> &Option<StaticPathCache> {
-        &self.cache
-    }
-}
-
-fn deserialize_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    duration_str::parse(&s).map_err(serde::de::Error::custom)
 }
 
 /// Builder for creating `StaticFileMetadata` instances.
 #[derive(Debug, Clone)]
 pub struct StaticFileMetadataBuilder {
-    mime: Option<String>,
+    mime: Option<Str>,
     size: u64,
     modified: std::time::SystemTime,
-    etag: Option<String>,
+    etag: Option<Str>,
 }
 
 impl StaticFileMetadataBuilder {
@@ -356,7 +211,7 @@ impl StaticFileMetadataBuilder {
     /// # Returns
     ///
     /// * `Self` - The builder.
-    pub fn mime(mut self, mime: String) -> Self {
+    pub fn mime(mut self, mime: Str) -> Self {
         self.mime = Some(mime);
         self
     }
@@ -398,7 +253,7 @@ impl StaticFileMetadataBuilder {
     /// # Returns
     ///
     /// * `Self` - The builder.
-    pub fn etag(mut self, etag: String) -> Self {
+    pub fn etag(mut self, etag: Str) -> Self {
         self.etag = Some(etag);
         self
     }
@@ -421,10 +276,10 @@ impl StaticFileMetadataBuilder {
 #[derive(Clone, Debug)]
 /// Metadata for a static file.
 pub struct StaticFileMetadata {
-    mime: Option<String>,
+    mime: Option<Str>,
     size: u64,
     modified: std::time::SystemTime,
-    etag: Option<String>,
+    etag: Option<Str>,
 }
 
 impl StaticFileMetadata {
@@ -446,8 +301,8 @@ impl StaticFileMetadata {
     ///
     /// # Returns
     ///
-    /// * `Option<&String>` - The mime type.
-    pub fn mime(&self) -> Option<&String> {
+    /// * `Option<&Str>` - The mime type.
+    pub fn mime(&self) -> Option<&Str> {
         self.mime.as_ref()
     }
 
@@ -473,8 +328,8 @@ impl StaticFileMetadata {
     ///
     /// # Returns
     ///
-    /// * `Option<&String>` - The etag.
-    pub fn etag(&self) -> Option<&String> {
+    /// * `Option<&Str>` - The etag.
+    pub fn etag(&self) -> Option<&Str> {
         self.etag.as_ref()
     }
 }
