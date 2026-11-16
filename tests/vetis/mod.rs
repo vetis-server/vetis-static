@@ -34,7 +34,7 @@ mod tokio {
 
     #[tokio::test]
     async fn test_from_file() -> VetisTestResult<()> {
-        let config_path = Path::new("files/vetis-static.yaml");
+        let config_path = Path::new("files/public/vetis-static.yaml");
         expect(config_path.exists()).to_be(truthy());
 
         let file = read_to_string(&config_path)
@@ -85,7 +85,7 @@ mod tokio {
 
     #[tokio::test]
     async fn test_index() -> VetisTestResult<()> {
-        let security_config = TlsConfig::builder()
+        let tls_config = TlsConfig::builder()
             .ca_file(CA_CERT)
             .cert_file(SERVER_CERT)
             .key_file(SERVER_KEY)
@@ -95,14 +95,14 @@ mod tokio {
             .hostname("localhost")
             .protos(&[Version::HTTP_11])
             .root_directory(".")
-            .tls(security_config)
+            .tls(tls_config)
             .bind_addresses(&[(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 9100)])
             .build()?;
 
         let mut virtual_host = Host::new(host_config).await?;
         virtual_host.add_hook(StaticHook::new(
             StaticHookConfig::builder()
-                .directory("files")
+                .directory("files/public")
                 .index_files(vec!["index.html".into()])
                 .build()?,
         ));
@@ -150,7 +150,7 @@ mod tokio {
 
     #[tokio::test]
     async fn test_not_found() -> VetisTestResult<()> {
-        let security_config = TlsConfig::builder()
+        let tls_config = TlsConfig::builder()
             .ca_file(CA_CERT)
             .cert_file(SERVER_CERT)
             .key_file(SERVER_KEY)
@@ -160,17 +160,17 @@ mod tokio {
             .hostname("localhost")
             .protos(&[Version::HTTP_11])
             .root_directory(".")
-            .tls(security_config)
+            .tls(tls_config)
             .bind_addresses(&[(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 9000)])
             .status_pages(status_pages! {
-               404 @ "files/404.html"
+               404 @ "files/public/404.html"
             })
             .build()?;
 
         let mut virtual_host = Host::new(host_config).await?;
         virtual_host.add_hook(StaticHook::new(
             StaticHookConfig::builder()
-                .directory("files")
+                .directory("files/public")
                 .build()?,
         ));
 

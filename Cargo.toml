@@ -30,7 +30,7 @@ minimime = "1.0.0"
 regex = "1.12.4"
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 time = "0.3.55"
-tokio = { version = "1.54.1", optional = true }
+tokio = { version = "1.54.1", features = ["fs"], optional = true }
 typetag = "0.2.21"
 vetis = { path = "../vetis/vetis" }
 
