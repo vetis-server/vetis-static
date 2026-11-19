@@ -11,7 +11,7 @@ use tokio::fs::File;
 use vetis::{
     Request, Response, Str, VetisFutureResult, VetisResult,
     errors::{HostError, RuntimeError, VetisError},
-    hook::{Hook, HookConfig, HookPhase},
+    hook::{Hook, HookConfig, HookPhase, HookPhases},
     matcher::Matcher,
 };
 
@@ -269,8 +269,8 @@ impl Hook for StaticHook {
         if let Some(matcher) = &self.matcher { matcher.is_match(context) } else { true }
     }
 
-    fn phase(&self) -> &HookPhase {
-        &HookPhase::Content
+    fn phases(&self) -> HookPhases {
+        HookPhases::new(HookPhase::Content)
     }
 
     fn matcher_mut(&mut self) -> Option<&mut Box<dyn Matcher>> {

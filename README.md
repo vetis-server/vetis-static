@@ -75,8 +75,6 @@ index_files: [index.html]
 - **directory**: The filesystem directory containing static files (required)
 - **index_files**: Optional list of index file names to serve for directory requests
 
-Duration fields support the string format from the `duration-str` crate (e.g., "60s", "5m", "1h").
-
 ## Runtime-Specific Modules
 
 Based on your selected runtime feature, import the appropriate module:
