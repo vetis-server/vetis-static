@@ -20,9 +20,8 @@ mod tokio {
     use vetis::{VetisServer, VetisTestResult, host::HostConfig, security::TlsConfig};
     #[allow(unused_imports)]
     use vetis_log::StderrLogConfig;
-    use vetis_macros::status_pages;
-    use vetis_static::{StaticHookConfig, tokio::StaticHook};
-    use vetis_tokio::{ServerConfig, Vetis, host::Host};
+    use vetis_static::StaticHookConfig;
+    use vetis_tokio::{ServerConfig, Vetis};
 
     #[allow(unused)]
     #[derive(Deserialize, Clone)]
@@ -93,23 +92,20 @@ mod tokio {
 
         let host_config = HostConfig::builder()
             .hostname("localhost")
-            .protos(&[Version::HTTP_11])
             .root_directory(".")
             .tls(tls_config)
-            .bind_addresses(&[(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 9100)])
+            .add_proto(Version::HTTP_11)
+            .add_bind_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 9100)
+            .add_hook(
+                StaticHookConfig::builder()
+                    .directory("files/public")
+                    .index_files(vec!["index.html".into()])
+                    .build()?,
+            )
             .build()?;
 
-        let mut virtual_host = Host::new(host_config).await?;
-        virtual_host.add_hook(StaticHook::new(
-            StaticHookConfig::builder()
-                .directory("files/public")
-                .index_files(vec!["index.html".into()])
-                .build()?,
-        ));
-
         let mut server = Vetis::builder()
-            .add_host(virtual_host)
-            .await?
+            .add_host(host_config)
             .build();
 
         server
@@ -158,25 +154,20 @@ mod tokio {
 
         let host_config = HostConfig::builder()
             .hostname("localhost")
-            .protos(&[Version::HTTP_11])
             .root_directory(".")
             .tls(tls_config)
-            .bind_addresses(&[(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 9000)])
-            .status_pages(status_pages! {
-               404 @ "files/public/404.html"
-            })
+            .add_proto(Version::HTTP_11)
+            .add_bind_address(Ipv4Addr::UNSPECIFIED, 9000)
+            .add_status_page(404, "files/public/404.html".into())
+            .add_hook(
+                StaticHookConfig::builder()
+                    .directory("files/public")
+                    .build()?,
+            )
             .build()?;
 
-        let mut virtual_host = Host::new(host_config).await?;
-        virtual_host.add_hook(StaticHook::new(
-            StaticHookConfig::builder()
-                .directory("files/public")
-                .build()?,
-        ));
-
         let mut server = Vetis::builder()
-            .add_host(virtual_host)
-            .await?
+            .add_host(host_config)
             .build();
 
         server

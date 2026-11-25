@@ -11,7 +11,7 @@ use tokio::fs::File;
 use vetis::{
     Request, Response, Str, VetisFutureResult, VetisResult,
     errors::{HostError, RuntimeError, VetisError},
-    hook::{Hook, HookConfig, HookPhase, HookPhases},
+    hook::{Hook, HookConfig, HookPhase},
     matcher::Matcher,
 };
 
@@ -35,12 +35,7 @@ impl StaticHook {
     ///
     /// * `StaticHook` - The static path
     pub fn new(config: StaticHookConfig) -> StaticHook {
-        let matcher = if let Some(matcher_config) = config.matcher() {
-            Some(matcher_config.boxed_matcher())
-        } else {
-            None
-        };
-        StaticHook { matcher, config }
+        StaticHook { matcher: None, config }
     }
 
     async fn read_metadata(&self, file_path: &std::path::Path) -> VetisResult<StaticFile> {
@@ -265,12 +260,27 @@ impl StaticHook {
 }
 
 impl Hook for StaticHook {
+    fn setup<'a>(&'a mut self) -> VetisFutureResult<'a, ()> {
+        Box::pin(async move {
+            let matcher = if let Some(matcher_config) = self
+                .config
+                .matcher()
+            {
+                Some(matcher_config.boxed_matcher())
+            } else {
+                None
+            };
+            self.matcher = matcher;
+            Ok(())
+        })
+    }
+
     fn has_matches(&self, context: &Context) -> bool {
         if let Some(matcher) = &self.matcher { matcher.is_match(context) } else { true }
     }
 
-    fn phases(&self) -> HookPhases {
-        HookPhases::new(HookPhase::Content)
+    fn phase(&self) -> HookPhase {
+        HookPhase::Content
     }
 
     fn matcher_mut(&mut self) -> Option<&mut Box<dyn Matcher>> {
