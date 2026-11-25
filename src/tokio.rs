@@ -326,7 +326,6 @@ impl Hook for StaticHook {
             {
                 for index in index_files {
                     let path_to_index = static_dir.join(index.as_str());
-                    println!("Index file: {:?}", path_to_index);
                     if path_to_index.exists() {
                         let response = Some(
                             self.serve_file(&path_to_index, None)
@@ -336,7 +335,6 @@ impl Hook for StaticHook {
                         return Ok((request, response));
                     }
                 }
-                println!("No index file found!");
                 return Err(VetisError::Host(HostError::Runtime(
                     RuntimeError::new("Access denied.").with_status_code(StatusCode::FORBIDDEN),
                 )));
